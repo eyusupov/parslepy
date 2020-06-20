@@ -2,6 +2,7 @@
 
 from __future__ import unicode_literals
 from parslepy.selectors import DefaultSelectorHandler, SelectorHandler, Selector
+from copy import deepcopy
 import lxml.etree
 import lxml.html
 import re
@@ -474,7 +475,7 @@ class Parselet(object):
             self.selector_handler.context = context
         return self._extract(self.parselet_tree, document)
 
-    def _extract(self, parselet_node, document, level=0):
+    def _extract(self, parselet_node, document, level=0, bucketed=False):
         """
         Extract values at this document node level
         using the parselet_node instructions:
@@ -495,17 +496,17 @@ class Parselet(object):
             for ctx, v in list(parselet_node.items()):
                 if self.DEBUG:
                     print(debug_offset, "context:", ctx, v)
-                extracted=None
+                extracted = None
                 try:
                     # scoped-extraction:
                     # extraction should be done deeper in the document tree
                     if ctx.scope:
                         extracted = []
                         selected = self.selector_handler.select(document, ctx.scope)
+
                         if selected:
                             for i, elem in enumerate(selected, start=1):
                                 parse_result = self._extract(v, elem, level=level+1)
-
                                 if isinstance(parse_result, (list, tuple)):
                                     extracted.extend(parse_result)
                                 else:
@@ -519,11 +520,28 @@ class Parselet(object):
                             if self.DEBUG:
                                 print(debug_offset,
                                     "parsed %d elements in scope (%s)" % (i, ctx.scope))
-
-                    # local extraction
+                    elif bucketed:
+                        extracted = []
+                        prev = None
+                        for el in self.selector_handler.select(document, v):
+                            if prev is not None:
+                                parent = lxml.etree.Element('__parent__')
+                                parent.append(deepcopy(prev))
+                                for s in prev.itersiblings():
+                                    if s == el:
+                                        extracted.append(self._extract(parselet_node, parent))
+                                        break
+                                    parent.append(deepcopy(s))
+                            prev = el
+                        parent = lxml.etree.Element('__parent__')
+                        parent.append(deepcopy(el))
+                        for s in el.itersiblings():
+                            parent.append(deepcopy(s))
+                        extracted.append(self._extract(parselet_node, parent))
+                        return extracted
                     else:
-                        extracted = self._extract(v, document, level=level+1)
-
+                        # local extraction
+                        extracted = self._extract(v, document, level=level+1, bucketed=ctx.iterate)
                 except NonMatchingNonOptionalKey as e:
                     if self.DEBUG:
                         print(debug_offset, str(e))
@@ -536,27 +554,24 @@ class Parselet(object):
                         print(str(e))
                     raise
 
-                # replace empty-list result when not looping by empty dict
-                if (    isinstance(extracted, list)
-                    and not extracted
-                    and not ctx.iterate):
-                        extracted = {}
-
-                # keep only the first element if we're not in an array
-                if self.KEEP_ONLY_FIRST_ELEMENT_IF_LIST:
-                    try:
-                        if (    isinstance(extracted, list)
-                            and extracted
-                            and not ctx.iterate):
-
-                            if self.DEBUG:
-                                print(debug_offset, "keep only 1st element")
-                            extracted =  extracted[0]
-
-                    except Exception as e:
-                        if self.DEBUG:
-                            print(str(e))
-                            print(debug_offset, "error getting first element")
+                if isinstance(extracted, list):
+                    if not ctx.iterate:
+                        if not extracted:
+                            # replace empty-list result when not looping by empty dict
+                            extracted = {}
+                        elif bucketed:
+                            pdb.set_trace()
+                            pass
+                        elif self.KEEP_ONLY_FIRST_ELEMENT_IF_LIST:
+                            # keep only the first element if we're not in an array
+                            try:
+                                if self.DEBUG:
+                                    print(debug_offset, "keep only 1st element")
+                                extracted =  extracted[0]
+                            except Exception as e:
+                                if self.DEBUG:
+                                    print(str(e))
+                                    print(debug_offset, "error getting first element")
 
                 # extraction for a required key gave nothing
                 if (    self.STRICT_MODE

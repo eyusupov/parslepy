@@ -264,3 +264,40 @@ def test_parslepy_parse_html_fromstring():
 
     extracted = parselet.parse_fromstring(htmldoc)
     assert_dict_equal(extracted, expected)
+
+def test_parslepy_parse_html_fromstring_bucket():
+
+    htmldoc = """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<h2>My BBQ Invitees</h2>
+<p>Joe</p>
+<p>Jeff</p>
+<p>Suzy</p>
+<h2>My Dinner Invitees</h2>
+<p>Dylan</p>
+<p>Hobbes</p>
+</html>
+    """
+
+    parselet = parslepy.Parselet(
+        {
+          "events": [{
+            "name": "h2",
+            "attendees": ["p"]
+          }]
+        })
+    parselet.DEBUG = True
+    expected = {
+      "events": [{
+        "name": "My BBQ Invitees",
+        "attendees": ["Joe", "Jeff", "Suzy"]
+      },
+      {
+        "name": "My Dinner Invitees",
+        "attendees": ["Dylan", "Hobbes"]
+      }]
+    }
+
+    extracted = parselet.parse_fromstring(htmldoc)
+    assert_dict_equal(extracted, expected)
